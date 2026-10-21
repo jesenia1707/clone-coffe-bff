@@ -83,6 +83,38 @@ jobs:
             mkdir -p /home/ec2-user/productos
             cd /home/ec2-user/productos
 
+            # Cargar variables de entorno desde .env si existe
+            if [ -f .env ]; then
+              echo "Cargando variables de entorno desde .env"
+              set -a
+              . ./.env
+              set +a
+            fi
+
+            # Validar que existan las variables requeridas por la aplicación
+            echo "Validando variables de entorno requeridas..."
+
+            MISSING=""
+            for VAR in DB_URL DB_USER DB_PASSWORD GATEWAY_SECRET; do
+              eval "VALUE=\${$VAR}"
+              if [ -z "$VALUE" ]; then
+                echo "FALTA: $VAR" >&2
+                MISSING="$MISSING $VAR"
+              else
+                echo "OK: $VAR"
+              fi
+            done
+
+            if [ -n "$MISSING" ]; then
+              echo ""
+              echo "Error: faltan variables de entorno requeridas:$MISSING" >&2
+              echo "Defínelas en /home/ec2-user/productos/.env o en el entorno del usuario ec2-user." >&2
+              echo "No se detiene ni reinicia la aplicación para no dejarla caída." >&2
+              exit 1
+            fi
+
+            echo "Todas las variables requeridas están definidas."
+
             echo "Deteniendo aplicación anterior..."
 
             if [ -f productos.pid ]; then
