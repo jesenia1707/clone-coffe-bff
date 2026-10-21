@@ -35,7 +35,10 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "build/libs/productos-0.0.1-SNAPSHOT.jar"
-          target: "/home/ec2-user/productos/productos.jar"
+          target: "/home/ec2-user/productos/"
+          strip_components: 2
+          overwrite: true
+          rm: true
 
   deploy:
     runs-on: ubuntu-latest
@@ -129,19 +132,50 @@ jobs:
               rm -f productos.pid
             fi
 
+            JAR="productos-0.0.1-SNAPSHOT.jar"
+
+            if [ ! -f "$JAR" ]; then
+              echo "Error: no se encontró el JAR '$JAR' en /home/ec2-user/productos." >&2
+              exit 1
+            fi
+
             echo "Iniciando Productos..."
 
-            nohup java -jar productos.jar > productos.log 2>&1 &
+            nohup java -jar "$JAR" > productos.log 2>&1 &
 
             echo $! > productos.pid
 
             echo "Productos iniciado con PID:"
             cat productos.pid
 
-            sleep 5
+            # Health check: esperar a que el puerto 8081 acepte conexiones
+            echo "Esperando a que la aplicación levante en el puerto 8081..."
 
-            echo "Proceso:"
-            ps -p "$(cat productos.pid)" -f
+            HEALTHY=""
+            for i in $(seq 1 30); do
+              # Si el proceso ya murió, no tiene sentido seguir esperando
+              if ! kill -0 "$(cat productos.pid)" 2>/dev/null; then
+                echo "El proceso de la aplicación terminó inesperadamente." >&2
+                break
+              fi
+
+              if (echo > /dev/tcp/127.0.0.1/8081) >/dev/null 2>&1; then
+                HEALTHY="ok"
+                echo "La aplicación responde en el puerto 8081 (intento $i)."
+                break
+              fi
+
+              sleep 2
+            done
 
             echo "Últimas líneas del log:"
-            tail -n 20 productos.log
+            tail -n 30 productos.log
+
+            if [ -z "$HEALTHY" ]; then
+              echo "" >&2
+              echo "Error: la aplicación no quedó escuchando en el puerto 8081." >&2
+              echo "Revisa el log anterior para ver la causa." >&2
+              exit 1
+            fi
+
+            echo "Deploy validado: Productos está arriba y escuchando en 8081."
