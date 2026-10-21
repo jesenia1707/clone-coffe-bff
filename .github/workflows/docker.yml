@@ -24,7 +24,6 @@ jobs:
           java-version: '21'
 
       - name: Build Productos
-        working-directory: productos
         run: |
           chmod +x gradlew
           ./gradlew clean build -x test
@@ -35,7 +34,7 @@ jobs:
           host: ${{ vars.TARGET_HOST_IP }}
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "productos/build/libs/productos-0.0.1-SNAPSHOT.jar"
+          source: "build/libs/productos-0.0.1-SNAPSHOT.jar"
           target: "/home/ec2-user/productos/productos.jar"
 
   deploy:
@@ -53,6 +52,35 @@ jobs:
           script: |
             echo "Conectado a EC2"
 
+            # Instalar Java 21 de forma idempotente (solo si no está disponible)
+            if command -v java >/dev/null 2>&1; then
+              echo "Java ya está instalado:"
+              java -version
+            else
+              echo "Java no encontrado. Instalando Java 21 (Amazon Corretto)..."
+
+              if command -v dnf >/dev/null 2>&1; then
+                sudo dnf install -y java-21-amazon-corretto-headless
+              elif command -v yum >/dev/null 2>&1; then
+                sudo yum install -y java-21-amazon-corretto-headless
+              elif command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update
+                sudo apt-get install -y openjdk-21-jre-headless
+              else
+                echo "No se encontró un gestor de paquetes compatible (dnf/yum/apt-get)." >&2
+                exit 1
+              fi
+
+              if command -v java >/dev/null 2>&1; then
+                echo "Java instalado correctamente:"
+                java -version
+              else
+                echo "La instalación de Java falló." >&2
+                exit 1
+              fi
+            fi
+
+            mkdir -p /home/ec2-user/productos
             cd /home/ec2-user/productos
 
             echo "Deteniendo aplicación anterior..."
