@@ -1,0 +1,89 @@
+name: Build and Deploy Productos
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build Productos
+        working-directory: productos
+        run: |
+          chmod +x gradlew
+          ./gradlew clean build -x test
+
+      - name: Upload JAR to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ vars.TARGET_HOST_IP }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "productos/build/libs/productos-0.0.1-SNAPSHOT.jar"
+          target: "/home/ec2-user/productos/productos.jar"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Deploy Productos en EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ vars.TARGET_HOST_IP }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+
+          script: |
+            echo "Conectado a EC2"
+
+            cd /home/ec2-user/productos
+
+            echo "Deteniendo aplicación anterior..."
+
+            if [ -f productos.pid ]; then
+              PID=$(cat productos.pid)
+
+              if kill -0 "$PID" 2>/dev/null; then
+                kill "$PID"
+                echo "Aplicación anterior detenida."
+                sleep 3
+              else
+                echo "El proceso anterior ya no estaba ejecutándose."
+              fi
+
+              rm -f productos.pid
+            fi
+
+            echo "Iniciando Productos..."
+
+            nohup java -jar productos.jar > productos.log 2>&1 &
+
+            echo $! > productos.pid
+
+            echo "Productos iniciado con PID:"
+            cat productos.pid
+
+            sleep 5
+
+            echo "Proceso:"
+            ps -p "$(cat productos.pid)" -f
+
+            echo "Últimas líneas del log:"
+            tail -n 20 productos.log
