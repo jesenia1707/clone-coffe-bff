@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# Evita que dos deploys se ejecuten a la vez y peleen por el puerto 8081
+concurrency:
+  group: deploy-productos
+  cancel-in-progress: false
+
 jobs:
 
   build:
@@ -119,6 +124,36 @@ jobs:
 
             # Validar que existan las variables requeridas inyectadas desde GitHub Secrets
             echo "Validando variables de entorno requeridas..."
+
+            # Asegurar que el puerto 8081 quede libre si quedara algún proceso huérfano
+            if command -v lsof >/dev/null 2>&1; then
+              PIDS=$(lsof -ti tcp:8081 2>/dev/null || true)
+              if [ -n "$PIDS" ]; then
+                echo "Liberando puerto 8081 ocupado por proceso(s): $PIDS"
+                kill $PIDS 2>/dev/null || true
+                sleep 2
+                PIDS2=$(lsof -ti tcp:8081 2>/dev/null || true)
+                if [ -n "$PIDS2" ]; then
+                  echo "Forzando cierre en 8081: $PIDS2"
+                  kill -9 $PIDS2 2>/dev/null || true
+                  sleep 2
+                fi
+              else
+                echo "Puerto 8081 libre."
+              fi
+            elif command -v ss >/dev/null 2>&1; then
+              if ss -ltn | grep -q ':8081 '; then
+                echo "Puerto 8081 parece ocupado. Intentando liberar..."
+                PIDS=$(ss -Htanp 2>/dev/null | grep ':8081 ' | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+                [ -n "$PIDS" ] && kill $PIDS 2>/dev/null || true
+                sleep 2
+                PIDS=$(ss -Htanp 2>/dev/null | grep ':8081 ' | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+                [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+                sleep 2
+              else
+                echo "Puerto 8081 libre."
+              fi
+            fi
 
             MISSING=""
             for VAR in DB_URL DB_USER DB_PASSWORD GATEWAY_SECRET; do
